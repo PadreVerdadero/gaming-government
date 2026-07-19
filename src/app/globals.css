@@ -1,0 +1,70 @@
+@import "tailwindcss";
+
+:root {
+  --ink: #0c1a24;
+  --ink-soft: #163044;
+  --stone: #d7e0e7;
+  --mist: #eef3f6;
+  --brass: #b8893a;
+  --brass-bright: #d4a84b;
+  --signal: #2f6f6a;
+  --danger: #9b3b3b;
+  --floor: #f4f7f9;
+}
+
+@theme inline {
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-stone: var(--stone);
+  --color-mist: var(--mist);
+  --color-brass: var(--brass);
+  --color-brass-bright: var(--brass-bright);
+  --color-signal: var(--signal);
+  --color-danger: var(--danger);
+  --color-floor: var(--floor);
+  --font-display: var(--font-display);
+  --font-body: var(--font-body);
+}
+
+body {
+  background:
+    radial-gradient(1200px 600px at 10% -10%, rgba(184, 137, 58, 0.18), transparent 55%),
+    radial-gradient(900px 500px at 90% 0%, rgba(47, 111, 106, 0.16), transparent 50%),
+    linear-gradient(180deg, #102434 0%, var(--ink) 40%, #0a141c 100%);
+  color: var(--mist);
+  font-family: var(--font-body), sans-serif;
+  min-height: 100vh;
+}
+
+::selection {
+  background: rgba(184, 137, 58, 0.35);
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse-gavel {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(184, 137, 58, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgba(184, 137, 58, 0);
+  }
+}
+
+.animate-rise {
+  animation: rise-in 0.55s ease-out both;
+}
+
+.animate-gavel {
+  animation: pulse-gavel 2.4s ease-in-out infinite;
+}
