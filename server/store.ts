@@ -2,7 +2,8 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { Chamber } from "../shared/types";
 
-const DATA_DIR = path.join(process.cwd(), "data", "chambers");
+const DATA_DIR =
+  process.env.DATA_DIR ?? path.join(process.cwd(), "data", "chambers");
 
 async function ensureDir(): Promise<void> {
   await fs.mkdir(DATA_DIR, { recursive: true });

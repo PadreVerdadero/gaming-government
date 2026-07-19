@@ -28,6 +28,18 @@ npm run dev
 
 Optional: copy `.env.example` to `.env.local` and adjust URLs.
 
+## Production / Railway
+
+One process serves Next.js and Socket.io together (`npm run start` → `server/prod.ts`).
+
+```bash
+railway link   # or railway init
+railway up
+railway domain
+```
+
+Set `NODE_ENV=production`. Optional: mount a volume and set `DATA_DIR` so chambers survive redeploys.
+
 ## How to play
 
 1. **Convene** a chamber (host) or **Take a seat** with a chamber code.
