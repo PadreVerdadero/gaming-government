@@ -4,11 +4,12 @@ import next from "next";
 import { attachChamber } from "./chamber";
 
 const dev = process.env.NODE_ENV !== "production";
-const hostname = process.env.HOSTNAME ?? "0.0.0.0";
+/** Bind all interfaces — do not use Docker/Railway HOSTNAME (container id). */
+const listenHost = process.env.HOST ?? "0.0.0.0";
 const port = Number(process.env.PORT ?? 3000);
 
 async function main() {
-  const app = next({ dev, hostname, port });
+  const app = next({ dev, hostname: listenHost, port });
   const handle = app.getRequestHandler();
   await app.prepare();
 
@@ -21,8 +22,8 @@ async function main() {
     corsOrigin: process.env.CLIENT_ORIGIN ?? true,
   });
 
-  httpServer.listen(port, hostname, () => {
-    console.log(`Gaming Government listening on http://${hostname}:${port}`);
+  httpServer.listen(port, listenHost, () => {
+    console.log(`Gaming Government listening on http://${listenHost}:${port}`);
   });
 }
 
