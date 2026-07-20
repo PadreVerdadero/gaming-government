@@ -29,6 +29,8 @@ export interface Player {
   name: string;
   score: number;
   connected: boolean;
+  /** Voting power; 0 means excluded from roll calls. Default 1. */
+  voteWeight: number;
   /** Secret; only ever sent to that player (and stored server-side). */
   seatToken: string;
 }
@@ -38,6 +40,7 @@ export interface PublicPlayer {
   name: string;
   score: number;
   connected: boolean;
+  voteWeight: number;
 }
 
 export interface Proposal {
@@ -161,6 +164,10 @@ export type ClientToServerEvents = {
   ) => void;
   set_pass_threshold: (
     payload: { code: string; value: number },
+    ack: (res: ActionAck) => void,
+  ) => void;
+  set_vote_weight: (
+    payload: { code: string; playerId: string; weight: number },
     ack: (res: ActionAck) => void,
   ) => void;
   floor_message: (

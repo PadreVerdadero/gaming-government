@@ -13,6 +13,7 @@ import {
   postCloakroomMessage,
   postFloorMessage,
   setPassThreshold,
+  setVoteWeight,
   setWinThreshold,
   startSession,
   submitProposal,
@@ -72,6 +73,7 @@ export function attachChamber(
       name: name.trim(),
       score: 0,
       connected: true,
+      voteWeight: 1,
       seatToken: makeId("seat"),
     };
   }
@@ -306,6 +308,12 @@ export function attachChamber(
     socket.on("set_pass_threshold", (payload, ack) => {
       void withSeat(payload.code, ack, (chamber, player) =>
         setPassThreshold(chamber, player.id, payload.value),
+      );
+    });
+
+    socket.on("set_vote_weight", (payload, ack) => {
+      void withSeat(payload.code, ack, (chamber, player) =>
+        setVoteWeight(chamber, player.id, payload.playerId, payload.weight),
       );
     });
 

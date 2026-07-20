@@ -48,7 +48,9 @@ export function ChamberApp({ code }: Props) {
     "connecting",
   );
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<"business" | "statute" | "journal">("business");
+  const [tab, setTab] = useState<"business" | "statute" | "journal" | "admin">(
+    "business",
+  );
   const [chatTab, setChatTab] = useState<"floor" | "cloakroom">("floor");
   const [floorText, setFloorText] = useState("");
   const [cloakText, setCloakText] = useState("");
@@ -56,11 +58,18 @@ export function ChamberApp({ code }: Props) {
   const [copied, setCopied] = useState(false);
   const [scoreFocus, setScoreFocus] = useState<string | null>(null);
   const [showArchived, setShowArchived] = useState(false);
+  const [statuteKind, setStatuteKind] = useState<
+    "all" | "immutable" | "mutable" | "new"
+  >("all");
+  const [statuteNumberQuery, setStatuteNumberQuery] = useState("");
   const [expandedHistory, setExpandedHistory] = useState<Record<string, boolean>>(
     {},
   );
   const [winDraft, setWinDraft] = useState("");
   const [passDraft, setPassDraft] = useState("");
+  const [voteWeightDrafts, setVoteWeightDrafts] = useState<Record<string, string>>(
+    {},
+  );
 
   const [proposalType, setProposalType] = useState<ProposalType>("enact");
   const [proposalTitle, setProposalTitle] = useState("");
@@ -156,6 +165,38 @@ export function ChamberApp({ code }: Props) {
         .sort((a, b) => a.number - b.number),
     [chamber],
   );
+
+  const filteredActiveRules = useMemo(() => {
+    const q = statuteNumberQuery.trim();
+    return activeRules.filter((rule) => {
+      if (statuteKind === "immutable" && rule.mutable) return false;
+      if (statuteKind === "mutable" && !rule.mutable) return false;
+      if (statuteKind === "new") {
+        const newlyAdded =
+          rule.number >= 301 ||
+          (rule.enactedByName !== "Initial Set" && rule.enactedById != null);
+        if (!newlyAdded) return false;
+      }
+      if (q && !String(rule.number).includes(q)) return false;
+      return true;
+    });
+  }, [activeRules, statuteKind, statuteNumberQuery]);
+
+  const filteredArchivedRules = useMemo(() => {
+    const q = statuteNumberQuery.trim();
+    return archivedRules.filter((rule) => {
+      if (statuteKind === "immutable" && rule.mutable) return false;
+      if (statuteKind === "mutable" && !rule.mutable) return false;
+      if (statuteKind === "new") {
+        const newlyAdded =
+          rule.number >= 301 ||
+          (rule.enactedByName !== "Initial Set" && rule.enactedById != null);
+        if (!newlyAdded) return false;
+      }
+      if (q && !String(rule.number).includes(q)) return false;
+      return true;
+    });
+  }, [archivedRules, statuteKind, statuteNumberQuery]);
 
   const mutableTargets = useMemo(
     () => activeRules.filter((r) => r.mutable),
@@ -422,6 +463,10 @@ export function ChamberApp({ code }: Props) {
                     <p className="text-xs text-stone/70">
                       {p.connected ? "Present" : "In recess"}
                       {p.id === chamber.hostId ? " · Host" : ""}
+                      {" · "}
+                      {(p.voteWeight ?? 1) === 0
+                        ? "no vote"
+                        : `${p.voteWeight ?? 1} vote${(p.voteWeight ?? 1) === 1 ? "" : "s"}`}
                     </p>
                     {scoreFocus === p.id && chamber.phase !== "lobby" && (
                       <div className="mt-2 flex gap-2">
@@ -462,73 +507,6 @@ export function ChamberApp({ code }: Props) {
             </ul>
           </div>
 
-          {chamber.phase !== "lobby" && (
-            <div className="space-y-3 border-t border-stone/15 pt-3">
-              <h3 className="text-xs tracking-wide text-brass uppercase">
-                Chamber dials
-              </h3>
-              <label className="block text-xs text-stone">
-                Win threshold (points)
-                <div className="mt-1 flex gap-2">
-                  <input
-                    type="number"
-                    min={1}
-                    value={winDraft}
-                    onChange={(e) => setWinDraft(e.target.value)}
-                    className="w-full rounded-lg border border-stone/20 bg-ink px-2 py-1.5 text-sm text-mist"
-                  />
-                  <button
-                    type="button"
-                    className="rounded-lg border border-brass/40 px-2 text-xs text-brass"
-                    onClick={() =>
-                      act((ack) =>
-                        getSocket().emit(
-                          "set_win_threshold",
-                          { code: chamberCode, value: Number(winDraft) },
-                          ack,
-                        ),
-                      )
-                    }
-                  >
-                    Set
-                  </button>
-                </div>
-              </label>
-              <label className="block text-xs text-stone">
-                Passage threshold (% aye)
-                <div className="mt-1 flex gap-2">
-                  <input
-                    type="number"
-                    min={0}
-                    max={100}
-                    step={1}
-                    value={passDraft}
-                    onChange={(e) => setPassDraft(e.target.value)}
-                    className="w-full rounded-lg border border-stone/20 bg-ink px-2 py-1.5 text-sm text-mist"
-                  />
-                  <button
-                    type="button"
-                    className="rounded-lg border border-brass/40 px-2 text-xs text-brass"
-                    onClick={() =>
-                      act((ack) =>
-                        getSocket().emit(
-                          "set_pass_threshold",
-                          { code: chamberCode, value: Number(passDraft) },
-                          ack,
-                        ),
-                      )
-                    }
-                  >
-                    Set
-                  </button>
-                </div>
-                <span className="mt-1 block text-[11px] text-stone/60">
-                  100 = unanimity · 50 = simple majority
-                </span>
-              </label>
-            </div>
-          )}
-
           {chamber.phase === "lobby" && playerId === chamber.hostId && (
             <button
               type="button"
@@ -558,6 +536,7 @@ export function ChamberApp({ code }: Props) {
                 ["business", "Order of business"],
                 ["statute", "Statute book"],
                 ["journal", "Journal"],
+                ["admin", "Admin"],
               ] as const
             ).map(([id, label]) => (
               <button
@@ -612,18 +591,28 @@ export function ChamberApp({ code }: Props) {
                   )}
 
                   <p className="mt-3 text-sm text-stone/80">
-                    Status: {activeProposal.status} · Votes{" "}
-                    {
-                      Object.values(activeProposal.votes).filter((v) => v === "aye")
-                        .length
-                    }
+                    Status: {activeProposal.status} · Weighted votes{" "}
+                    {chamber.players.reduce(
+                      (sum, p) =>
+                        activeProposal.votes[p.id] === "aye"
+                          ? sum + (p.voteWeight ?? 1)
+                          : sum,
+                      0,
+                    )}
                     –
-                    {
-                      Object.values(activeProposal.votes).filter((v) => v === "nay")
-                        .length
-                    }{" "}
-                    of {chamber.players.length} · need{" "}
-                    {chamber.passThresholdPercent}% aye
+                    {chamber.players.reduce(
+                      (sum, p) =>
+                        activeProposal.votes[p.id] === "nay"
+                          ? sum + (p.voteWeight ?? 1)
+                          : sum,
+                      0,
+                    )}{" "}
+                    of{" "}
+                    {chamber.players.reduce(
+                      (sum, p) => sum + Math.max(0, p.voteWeight ?? 1),
+                      0,
+                    )}{" "}
+                    · need {chamber.passThresholdPercent}% aye
                   </p>
 
                   {activeProposal.status === "debate" &&
@@ -760,6 +749,15 @@ export function ChamberApp({ code }: Props) {
 
                   {activeProposal.status === "voting" &&
                     playerId &&
+                    (me?.voteWeight ?? 1) <= 0 && (
+                      <p className="mt-4 text-sm text-stone">
+                        You have zero votes and are not called on this roll.
+                      </p>
+                    )}
+
+                  {activeProposal.status === "voting" &&
+                    playerId &&
+                    (me?.voteWeight ?? 1) > 0 &&
                     !activeProposal.votes[playerId] && (
                       <div className="mt-4 flex gap-2">
                         <button
@@ -767,23 +765,26 @@ export function ChamberApp({ code }: Props) {
                           onClick={() => vote("aye")}
                           className="rounded-lg bg-signal px-4 py-2 text-sm text-mist"
                         >
-                          Aye
+                          Aye ({me?.voteWeight ?? 1})
                         </button>
                         <button
                           type="button"
                           onClick={() => vote("nay")}
                           className="rounded-lg bg-danger/80 px-4 py-2 text-sm text-mist"
                         >
-                          Nay
+                          Nay ({me?.voteWeight ?? 1})
                         </button>
                       </div>
                     )}
 
                   {activeProposal.status === "voting" &&
                     playerId &&
+                    (me?.voteWeight ?? 1) > 0 &&
                     activeProposal.votes[playerId] && (
                       <p className="mt-4 text-sm text-brass">
-                        You voted {activeProposal.votes[playerId]}. Waiting for
+                        You voted {activeProposal.votes[playerId]} (
+                        {me?.voteWeight ?? 1} vote
+                        {(me?.voteWeight ?? 1) === 1 ? "" : "s"}). Waiting for
                         the full roll.
                       </p>
                     )}
@@ -933,13 +934,37 @@ export function ChamberApp({ code }: Props) {
 
           {tab === "statute" && (
             <div className="space-y-2">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-xs text-stone">
-                  <span className="text-brass">Gold</span> immutable ·{" "}
-                  <span className="text-sky-300">Blue</span> mutable ·{" "}
-                  <span className="text-red-300">Red</span> amended/repealed
-                </p>
-                <label className="flex items-center gap-2 text-xs text-stone">
+              <div className="flex flex-wrap items-center gap-2">
+                {(
+                  [
+                    ["all", "All"],
+                    ["immutable", "Immutable"],
+                    ["mutable", "Mutable"],
+                    ["new", "Newly added"],
+                  ] as const
+                ).map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setStatuteKind(id)}
+                    className={`rounded-full px-2.5 py-1 text-xs ${
+                      statuteKind === id
+                        ? "bg-mist text-ink"
+                        : "bg-ink/50 text-stone"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+                <input
+                  type="search"
+                  inputMode="numeric"
+                  placeholder="Filter #"
+                  value={statuteNumberQuery}
+                  onChange={(e) => setStatuteNumberQuery(e.target.value)}
+                  className="w-24 rounded-lg border border-stone/20 bg-ink px-2 py-1 text-xs text-mist"
+                />
+                <label className="ml-auto flex items-center gap-2 text-xs text-stone">
                   <input
                     type="checkbox"
                     checked={showArchived}
@@ -948,19 +973,162 @@ export function ChamberApp({ code }: Props) {
                   Show amended / repealed
                 </label>
               </div>
+              <p className="text-[10px] text-stone/70">
+                <span className="text-brass">Gold</span> immutable ·{" "}
+                <span className="text-sky-300">Blue</span> mutable ·{" "}
+                <span className="text-red-300">Red</span> amended/repealed ·{" "}
+                Newly added = enacted in play (301+)
+              </p>
               <div className="grid grid-cols-1 gap-1.5 xl:grid-cols-2">
-                {activeRules.map(renderRuleCard)}
+                {filteredActiveRules.map(renderRuleCard)}
+                {filteredActiveRules.length === 0 && (
+                  <p className="text-xs text-stone/60">No rules match these filters.</p>
+                )}
               </div>
-              {showArchived && archivedRules.length > 0 && (
+              {showArchived && filteredArchivedRules.length > 0 && (
                 <div className="space-y-1.5">
                   <h3 className="pt-1 text-[10px] tracking-wide text-red-300 uppercase">
                     Superseded & repealed
                   </h3>
                   <div className="grid grid-cols-1 gap-1.5 xl:grid-cols-2">
-                    {archivedRules.map(renderRuleCard)}
+                    {filteredArchivedRules.map(renderRuleCard)}
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {tab === "admin" && (
+            <div className="space-y-5">
+              <div className="rounded-xl border border-stone/15 bg-ink-soft/60 p-4">
+                <h3 className="text-xs tracking-wide text-brass uppercase">
+                  Chamber dials
+                </h3>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <label className="block text-xs text-stone">
+                    Win threshold (points)
+                    <div className="mt-1 flex gap-2">
+                      <input
+                        type="number"
+                        min={1}
+                        value={winDraft}
+                        onChange={(e) => setWinDraft(e.target.value)}
+                        className="w-full rounded-lg border border-stone/20 bg-ink px-2 py-1.5 text-sm text-mist"
+                      />
+                      <button
+                        type="button"
+                        className="rounded-lg border border-brass/40 px-2 text-xs text-brass"
+                        onClick={() =>
+                          act((ack) =>
+                            getSocket().emit(
+                              "set_win_threshold",
+                              { code: chamberCode, value: Number(winDraft) },
+                              ack,
+                            ),
+                          )
+                        }
+                      >
+                        Set
+                      </button>
+                    </div>
+                  </label>
+                  <label className="block text-xs text-stone">
+                    Passage threshold (% aye)
+                    <div className="mt-1 flex gap-2">
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        step={1}
+                        value={passDraft}
+                        onChange={(e) => setPassDraft(e.target.value)}
+                        className="w-full rounded-lg border border-stone/20 bg-ink px-2 py-1.5 text-sm text-mist"
+                      />
+                      <button
+                        type="button"
+                        className="rounded-lg border border-brass/40 px-2 text-xs text-brass"
+                        onClick={() =>
+                          act((ack) =>
+                            getSocket().emit(
+                              "set_pass_threshold",
+                              { code: chamberCode, value: Number(passDraft) },
+                              ack,
+                            ),
+                          )
+                        }
+                      >
+                        Set
+                      </button>
+                    </div>
+                    <span className="mt-1 block text-[11px] text-stone/60">
+                      100 = unanimity · 50 = simple majority
+                    </span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-stone/15 bg-ink-soft/60 p-4">
+                <h3 className="text-xs tracking-wide text-brass uppercase">
+                  Vote weights
+                </h3>
+                <p className="mt-1 text-xs text-stone/70">
+                  Set to 0 to exclude a member from roll calls. Higher numbers
+                  count as multiple votes.
+                </p>
+                <ul className="mt-3 space-y-2">
+                  {[...chamber.players]
+                    .sort((a, b) => a.name.localeCompare(b.name))
+                    .map((p) => (
+                      <li
+                        key={p.id}
+                        className="flex flex-wrap items-center gap-2 rounded-lg bg-ink/40 px-3 py-2"
+                      >
+                        <span className="min-w-28 flex-1 text-sm text-mist">
+                          {p.name}
+                          {p.id === playerId ? " (you)" : ""}
+                        </span>
+                        <input
+                          type="number"
+                          min={0}
+                          step={1}
+                          value={
+                            voteWeightDrafts[p.id] ?? String(p.voteWeight ?? 1)
+                          }
+                          onChange={(e) =>
+                            setVoteWeightDrafts((prev) => ({
+                              ...prev,
+                              [p.id]: e.target.value,
+                            }))
+                          }
+                          className="w-20 rounded-lg border border-stone/20 bg-ink px-2 py-1 text-sm text-mist"
+                        />
+                        <button
+                          type="button"
+                          className="rounded-lg border border-brass/40 px-2 py-1 text-xs text-brass"
+                          onClick={() =>
+                            act((ack) =>
+                              getSocket().emit(
+                                "set_vote_weight",
+                                {
+                                  code: chamberCode,
+                                  playerId: p.id,
+                                  weight: Number(
+                                    voteWeightDrafts[p.id] ??
+                                      p.voteWeight ??
+                                      1,
+                                  ),
+                                },
+                                ack,
+                              ),
+                            )
+                          }
+                        >
+                          Set
+                        </button>
+                      </li>
+                    ))}
+                </ul>
+              </div>
             </div>
           )}
 

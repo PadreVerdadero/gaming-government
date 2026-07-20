@@ -81,8 +81,17 @@ export function normalizeChamber(raw: Chamber): Chamber {
     (raw as Chamber & { majorityRuleActive?: boolean }).majorityRuleActive,
   );
 
+  const players = (raw.players ?? []).map((p) => ({
+    ...p,
+    voteWeight:
+      typeof p.voteWeight === "number" && Number.isFinite(p.voteWeight)
+        ? Math.max(0, Math.trunc(p.voteWeight))
+        : 1,
+  }));
+
   return {
     ...raw,
+    players,
     rules,
     passThresholdPercent:
       raw.passThresholdPercent ??
@@ -101,7 +110,16 @@ export function toPublicPlayer(p: Player): PublicPlayer {
     name: p.name,
     score: p.score,
     connected: p.connected,
+    voteWeight: p.voteWeight ?? 1,
   };
+}
+
+export function eligibleVoters(chamber: Chamber): Player[] {
+  return chamber.players.filter((p) => (p.voteWeight ?? 1) > 0);
+}
+
+export function playerVoteWeight(player: Player): number {
+  return Math.max(0, Math.trunc(player.voteWeight ?? 1));
 }
 
 export function filterMessagesForPlayer(
@@ -434,6 +452,9 @@ export function openRollCall(chamber: Chamber, playerId: string): string | null 
     return "No bill is in debate.";
   }
   if (proposal.proponentId !== playerId) return "Only the proponent may call the roll.";
+  if (eligibleVoters(chamber).length === 0) {
+    return "No eligible voters (everyone has zero vote weight).";
+  }
 
   proposal.status = "voting";
   addLog(chamber, `Roll call opened on Proposal ${proposal.number}.`);
@@ -508,11 +529,18 @@ export function castVote(
   if (chamber.phase !== "playing") return "Session is not in play.";
   const proposal = getActiveProposal(chamber);
   if (!proposal || proposal.status !== "voting") return "No roll call is open.";
+  const voter = chamber.players.find((p) => p.id === playerId);
+  if (!voter) return "Member not found.";
+  if (playerVoteWeight(voter) <= 0) {
+    return "You have zero votes and do not participate in this roll call.";
+  }
   if (proposal.votes[playerId]) return "You have already voted.";
 
   proposal.votes[playerId] = choice;
 
-  if (Object.keys(proposal.votes).length < chamber.players.length) {
+  const eligible = eligibleVoters(chamber);
+  const allIn = eligible.every((p) => proposal.votes[p.id] != null);
+  if (!allIn) {
     chamber.updatedAt = nowIso();
     return null;
   }
@@ -520,14 +548,26 @@ export function castVote(
   return resolveVote(chamber, proposal);
 }
 
-function resolveVote(chamber: Chamber, proposal: Proposal): string | null {
-  const voters = chamber.players;
-  const aye = voters.filter((p) => proposal.votes[p.id] === "aye");
-  const nay = voters.filter((p) => proposal.votes[p.id] === "nay");
-  const ayeCount = aye.length;
-  const total = voters.length;
+function weightedTally(
+  chamber: Chamber,
+  proposal: Proposal,
+): { ayeWeight: number; nayWeight: number; totalWeight: number } {
+  let ayeWeight = 0;
+  let nayWeight = 0;
+  let totalWeight = 0;
+  for (const voter of eligibleVoters(chamber)) {
+    const weight = playerVoteWeight(voter);
+    totalWeight += weight;
+    if (proposal.votes[voter.id] === "aye") ayeWeight += weight;
+    if (proposal.votes[voter.id] === "nay") nayWeight += weight;
+  }
+  return { ayeWeight, nayWeight, totalWeight };
+}
 
-  const adopted = passesThreshold(chamber, ayeCount, total);
+function resolveVote(chamber: Chamber, proposal: Proposal): string | null {
+  const { ayeWeight, nayWeight, totalWeight } = weightedTally(chamber, proposal);
+
+  const adopted = passesThreshold(chamber, ayeWeight, totalWeight);
   proposal.resolvedAt = nowIso();
 
   if (adopted) {
@@ -542,19 +582,38 @@ function resolveVote(chamber: Chamber, proposal: Proposal): string | null {
       proposal.status = "adopted";
       addLog(
         chamber,
-        `Proposal ${proposal.number} adopted (${ayeCount}-${nay.length}) at ${chamber.passThresholdPercent}% threshold.`,
+        `Proposal ${proposal.number} adopted (${ayeWeight}-${nayWeight} weighted) at ${chamber.passThresholdPercent}% threshold.`,
       );
     }
   } else {
     proposal.status = "defeated";
     addLog(
       chamber,
-      `Proposal ${proposal.number} defeated (${ayeCount}-${nay.length}). Needed ${chamber.passThresholdPercent}% aye.`,
+      `Proposal ${proposal.number} defeated (${ayeWeight}-${nayWeight} weighted). Needed ${chamber.passThresholdPercent}% aye.`,
     );
   }
 
   checkWinner(chamber);
   chamber.updatedAt = nowIso();
+  return null;
+}
+
+export function setVoteWeight(
+  chamber: Chamber,
+  actorId: string,
+  playerId: string,
+  weight: number,
+): string | null {
+  if (!Number.isFinite(weight) || weight < 0) {
+    return "Vote weight must be zero or a positive integer.";
+  }
+  const target = chamber.players.find((p) => p.id === playerId);
+  if (!target) return "Member not found.";
+  target.voteWeight = Math.trunc(weight);
+  addLog(
+    chamber,
+    `${playerName(chamber, actorId)} set ${target.name}'s vote weight to ${target.voteWeight}.`,
+  );
   return null;
 }
 
