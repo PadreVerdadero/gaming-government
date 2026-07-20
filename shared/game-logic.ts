@@ -4,6 +4,7 @@ import {
   DEFAULT_WIN_THRESHOLD,
 } from "./initial-rules";
 import type {
+  Ballot,
   Chamber,
   ChatMessage,
   LogEntry,
@@ -13,7 +14,6 @@ import type {
   PublicChamber,
   PublicPlayer,
   Rule,
-  VoteChoice,
 } from "./types";
 
 export { DEFAULT_PASS_THRESHOLD_PERCENT, DEFAULT_WIN_THRESHOLD };
@@ -89,6 +89,11 @@ export function normalizeChamber(raw: Chamber): Chamber {
         : 1,
   }));
 
+  const proposals = (raw.proposals ?? []).map((p) => ({
+    ...p,
+    votes: normalizeVotesMap(p.votes as Record<string, Ballot | string>),
+  }));
+
   return {
     ...raw,
     players,
@@ -98,10 +103,34 @@ export function normalizeChamber(raw: Chamber): Chamber {
       (legacyMajority ? 50 : DEFAULT_PASS_THRESHOLD_PERCENT),
     winThreshold: raw.winThreshold ?? DEFAULT_WIN_THRESHOLD,
     winnerId: raw.winnerId ?? null,
-    proposals: raw.proposals ?? [],
+    proposals,
     messages: raw.messages ?? [],
     log: raw.log ?? [],
   };
+}
+
+export function normalizeBallot(
+  value: Ballot | string | undefined | null,
+): Ballot | undefined {
+  if (value == null) return undefined;
+  if (typeof value === "string") {
+    return value === "aye" ? { aye: 1, nay: 0 } : { aye: 0, nay: 1 };
+  }
+  const aye = Math.max(0, Math.trunc(value.aye || 0));
+  const nay = Math.max(0, Math.trunc(value.nay || 0));
+  return { aye, nay };
+}
+
+function normalizeVotesMap(
+  votes: Record<string, Ballot | string> | undefined,
+): Record<string, Ballot> {
+  const out: Record<string, Ballot> = {};
+  if (!votes) return out;
+  for (const [id, value] of Object.entries(votes)) {
+    const ballot = normalizeBallot(value);
+    if (ballot) out[id] = ballot;
+  }
+  return out;
 }
 
 export function toPublicPlayer(p: Player): PublicPlayer {
@@ -203,9 +232,6 @@ function applyAdoptedProposal(
   const enactorName = playerName(chamber, proposal.proponentId);
 
   if (proposal.type === "enact") {
-    if (mutableRuleCount(chamber) >= 25) {
-      return "Rule 209: there may not be more than 25 mutable rules.";
-    }
     chamber.rules.push({
       id: makeId("rule"),
       number: proposal.number,
@@ -301,9 +327,6 @@ function applyAdoptedProposal(
       : findActiveRule(chamber, proposal.targetRuleNumber!);
     if (!target) return "Target rule not found.";
     const becomingMutable = proposal.makeMutable ?? !target.mutable;
-    if (becomingMutable && !target.mutable && mutableRuleCount(chamber) >= 25) {
-      return "Rule 209: there may not be more than 25 mutable rules.";
-    }
     if (!becomingMutable && target.mutable && mutableRuleCount(chamber) <= 1) {
       return "Rule 114: there must always be at least one mutable rule.";
     }
@@ -415,9 +438,6 @@ export function submitProposal(
     if (!text) return "Provide the amended text of the rule.";
   } else {
     if (!title || !text) return "Bills need a title and body text.";
-    if (mutableRuleCount(chamber) >= 25) {
-      return "Rule 209: there may not be more than 25 mutable rules.";
-    }
   }
 
   const proposal: Proposal = {
@@ -524,19 +544,33 @@ export function editProposal(
 export function castVote(
   chamber: Chamber,
   playerId: string,
-  choice: VoteChoice,
+  aye: number,
+  nay: number,
+  options?: { allowOverwrite?: boolean; skipWeightCheck?: boolean },
 ): string | null {
   if (chamber.phase !== "playing") return "Session is not in play.";
   const proposal = getActiveProposal(chamber);
   if (!proposal || proposal.status !== "voting") return "No roll call is open.";
   const voter = chamber.players.find((p) => p.id === playerId);
   if (!voter) return "Member not found.";
-  if (playerVoteWeight(voter) <= 0) {
+  const weight = playerVoteWeight(voter);
+  if (!options?.skipWeightCheck && weight <= 0) {
     return "You have zero votes and do not participate in this roll call.";
   }
-  if (proposal.votes[playerId]) return "You have already voted.";
+  if (!options?.allowOverwrite && proposal.votes[playerId]) {
+    return "You have already voted.";
+  }
 
-  proposal.votes[playerId] = choice;
+  const ayeN = Math.max(0, Math.trunc(aye));
+  const nayN = Math.max(0, Math.trunc(nay));
+  if (ayeN + nayN !== weight && !options?.skipWeightCheck) {
+    return `Aye + Nay must equal your vote weight (${weight}).`;
+  }
+  if (ayeN + nayN === 0 && weight > 0) {
+    return "Cast at least one vote.";
+  }
+
+  proposal.votes[playerId] = { aye: ayeN, nay: nayN };
 
   const eligible = eligibleVoters(chamber);
   const allIn = eligible.every((p) => proposal.votes[p.id] != null);
@@ -548,7 +582,7 @@ export function castVote(
   return resolveVote(chamber, proposal);
 }
 
-function weightedTally(
+export function weightedTally(
   chamber: Chamber,
   proposal: Proposal,
 ): { ayeWeight: number; nayWeight: number; totalWeight: number } {
@@ -558,13 +592,16 @@ function weightedTally(
   for (const voter of eligibleVoters(chamber)) {
     const weight = playerVoteWeight(voter);
     totalWeight += weight;
-    if (proposal.votes[voter.id] === "aye") ayeWeight += weight;
-    if (proposal.votes[voter.id] === "nay") nayWeight += weight;
+    const ballot = normalizeBallot(proposal.votes[voter.id]);
+    if (ballot) {
+      ayeWeight += ballot.aye;
+      nayWeight += ballot.nay;
+    }
   }
   return { ayeWeight, nayWeight, totalWeight };
 }
 
-function resolveVote(chamber: Chamber, proposal: Proposal): string | null {
+export function resolveVote(chamber: Chamber, proposal: Proposal): string | null {
   const { ayeWeight, nayWeight, totalWeight } = weightedTally(chamber, proposal);
 
   const adopted = passesThreshold(chamber, ayeWeight, totalWeight);
@@ -597,6 +634,57 @@ function resolveVote(chamber: Chamber, proposal: Proposal): string | null {
   chamber.updatedAt = nowIso();
   return null;
 }
+
+/** Admin / ledger: adopt the active proposal regardless of current ballots. */
+export function forceAdoptProposal(
+  chamber: Chamber,
+  actorId: string,
+): string | null {
+  const proposal = getActiveProposal(chamber);
+  if (!proposal) return "No proposal is on the floor.";
+  const err = applyAdoptedProposal(chamber, proposal);
+  if (err) return err;
+  proposal.status = "adopted";
+  proposal.resolvedAt = nowIso();
+  addLog(
+    chamber,
+    `${playerName(chamber, actorId)} adopted Proposal ${proposal.number} by admin fiat (no vote).`,
+  );
+  checkWinner(chamber);
+  return null;
+}
+
+export function forceDefeatProposal(
+  chamber: Chamber,
+  actorId: string,
+): string | null {
+  const proposal = getActiveProposal(chamber);
+  if (!proposal) return "No proposal is on the floor.";
+  proposal.status = "defeated";
+  proposal.resolvedAt = nowIso();
+  addLog(
+    chamber,
+    `${playerName(chamber, actorId)} defeated Proposal ${proposal.number} by admin fiat.`,
+  );
+  return null;
+}
+
+export function withdrawProposal(
+  chamber: Chamber,
+  actorId: string,
+): string | null {
+  const proposal = getActiveProposal(chamber);
+  if (!proposal) return "No proposal is on the floor.";
+  proposal.status = "defeated";
+  proposal.resolvedAt = nowIso();
+  addLog(
+    chamber,
+    `${playerName(chamber, actorId)} withdrew Proposal ${proposal.number}.`,
+  );
+  return null;
+}
+
+export { applyAdoptedProposal, playerName, checkWinner };
 
 export function setVoteWeight(
   chamber: Chamber,

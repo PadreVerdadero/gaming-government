@@ -1,6 +1,7 @@
 import type { Server as HttpServer } from "node:http";
 import { customAlphabet } from "nanoid";
 import { Server } from "socket.io";
+import { applyAdminAction } from "../shared/admin";
 import {
   addLog,
   adjustScore,
@@ -19,6 +20,7 @@ import {
   submitProposal,
   toPublicChamber,
 } from "../shared/game-logic";
+import type { AdminAction } from "../shared/types";
 import type {
   ActionAck,
   Chamber,
@@ -289,7 +291,13 @@ export function attachChamber(
 
     socket.on("cast_vote", (payload, ack) => {
       void withSeat(payload.code, ack, (chamber, player) =>
-        castVote(chamber, player.id, payload.choice),
+        castVote(chamber, player.id, payload.aye, payload.nay),
+      );
+    });
+
+    socket.on("admin_action", (payload, ack) => {
+      void withSeat(payload.code, ack, (chamber, player) =>
+        applyAdminAction(chamber, player.id, payload.action as AdminAction),
       );
     });
 

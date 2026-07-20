@@ -2,16 +2,12 @@
 
 import Link from "next/link";
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { AdminPanel } from "@/components/AdminPanel";
 import { TextDiff } from "@/components/TextDiff";
 import { formatTime, proposalTypeLabel } from "@/lib/format";
 import { getSeat, saveSeat } from "@/lib/session";
 import { getSocket } from "@/lib/socket";
-import type {
-  ProposalType,
-  PublicChamber,
-  Rule,
-  VoteChoice,
-} from "../../shared/types";
+import type { ProposalType, PublicChamber, Rule } from "../../shared/types";
 
 type Props = { code: string };
 
@@ -70,6 +66,8 @@ export function ChamberApp({ code }: Props) {
   const [voteWeightDrafts, setVoteWeightDrafts] = useState<Record<string, string>>(
     {},
   );
+  const [ayeVotes, setAyeVotes] = useState(1);
+  const [nayVotes, setNayVotes] = useState(0);
 
   const [proposalType, setProposalType] = useState<ProposalType>("enact");
   const [proposalTitle, setProposalTitle] = useState("");
@@ -291,9 +289,13 @@ export function ChamberApp({ code }: Props) {
     );
   }
 
-  function vote(choice: VoteChoice) {
+  function submitBallot() {
     act((ack) =>
-      getSocket().emit("cast_vote", { code: chamberCode, choice }, ack),
+      getSocket().emit(
+        "cast_vote",
+        { code: chamberCode, aye: ayeVotes, nay: nayVotes },
+        ack,
+      ),
     );
   }
 
@@ -592,19 +594,13 @@ export function ChamberApp({ code }: Props) {
 
                   <p className="mt-3 text-sm text-stone/80">
                     Status: {activeProposal.status} · Weighted votes{" "}
-                    {chamber.players.reduce(
-                      (sum, p) =>
-                        activeProposal.votes[p.id] === "aye"
-                          ? sum + (p.voteWeight ?? 1)
-                          : sum,
+                    {Object.values(activeProposal.votes).reduce(
+                      (sum, b) => sum + (b?.aye ?? 0),
                       0,
                     )}
                     –
-                    {chamber.players.reduce(
-                      (sum, p) =>
-                        activeProposal.votes[p.id] === "nay"
-                          ? sum + (p.voteWeight ?? 1)
-                          : sum,
+                    {Object.values(activeProposal.votes).reduce(
+                      (sum, b) => sum + (b?.nay ?? 0),
                       0,
                     )}{" "}
                     of{" "}
@@ -759,21 +755,100 @@ export function ChamberApp({ code }: Props) {
                     playerId &&
                     (me?.voteWeight ?? 1) > 0 &&
                     !activeProposal.votes[playerId] && (
-                      <div className="mt-4 flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => vote("aye")}
-                          className="rounded-lg bg-signal px-4 py-2 text-sm text-mist"
-                        >
-                          Aye ({me?.voteWeight ?? 1})
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => vote("nay")}
-                          className="rounded-lg bg-danger/80 px-4 py-2 text-sm text-mist"
-                        >
-                          Nay ({me?.voteWeight ?? 1})
-                        </button>
+                      <div className="mt-4 space-y-3">
+                        {(me?.voteWeight ?? 1) === 1 ? (
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setAyeVotes(1);
+                                setNayVotes(0);
+                                act((ack) =>
+                                  getSocket().emit(
+                                    "cast_vote",
+                                    { code: chamberCode, aye: 1, nay: 0 },
+                                    ack,
+                                  ),
+                                );
+                              }}
+                              className="rounded-lg bg-signal px-4 py-2 text-sm text-mist"
+                            >
+                              Aye
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                act((ack) =>
+                                  getSocket().emit(
+                                    "cast_vote",
+                                    { code: chamberCode, aye: 0, nay: 1 },
+                                    ack,
+                                  ),
+                                );
+                              }}
+                              className="rounded-lg bg-danger/80 px-4 py-2 text-sm text-mist"
+                            >
+                              Nay
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <p className="text-sm text-stone">
+                              You have {me?.voteWeight} votes. Split them between
+                              Aye and Nay (must sum to {me?.voteWeight}).
+                            </p>
+                            <div className="flex flex-wrap items-end gap-3">
+                              <label className="text-sm text-stone">
+                                Aye
+                                <input
+                                  type="number"
+                                  min={0}
+                                  max={me?.voteWeight ?? 1}
+                                  value={ayeVotes}
+                                  onChange={(e) => {
+                                    const aye = Math.max(
+                                      0,
+                                      Number(e.target.value) || 0,
+                                    );
+                                    const max = me?.voteWeight ?? 1;
+                                    setAyeVotes(Math.min(aye, max));
+                                    setNayVotes(Math.max(0, max - Math.min(aye, max)));
+                                  }}
+                                  className="mt-1 block w-24 rounded-lg border border-stone/20 bg-ink px-2 py-1.5 text-mist"
+                                />
+                              </label>
+                              <label className="text-sm text-stone">
+                                Nay
+                                <input
+                                  type="number"
+                                  min={0}
+                                  max={me?.voteWeight ?? 1}
+                                  value={nayVotes}
+                                  onChange={(e) => {
+                                    const nay = Math.max(
+                                      0,
+                                      Number(e.target.value) || 0,
+                                    );
+                                    const max = me?.voteWeight ?? 1;
+                                    setNayVotes(Math.min(nay, max));
+                                    setAyeVotes(Math.max(0, max - Math.min(nay, max)));
+                                  }}
+                                  className="mt-1 block w-24 rounded-lg border border-stone/20 bg-ink px-2 py-1.5 text-mist"
+                                />
+                              </label>
+                              <button
+                                type="button"
+                                onClick={submitBallot}
+                                disabled={
+                                  ayeVotes + nayVotes !== (me?.voteWeight ?? 1)
+                                }
+                                className="rounded-lg bg-brass-bright px-4 py-2 text-sm font-medium text-ink disabled:opacity-50"
+                              >
+                                Cast ballot ({ayeVotes}–{nayVotes})
+                              </button>
+                            </div>
+                          </>
+                        )}
                       </div>
                     )}
 
@@ -782,10 +857,9 @@ export function ChamberApp({ code }: Props) {
                     (me?.voteWeight ?? 1) > 0 &&
                     activeProposal.votes[playerId] && (
                       <p className="mt-4 text-sm text-brass">
-                        You voted {activeProposal.votes[playerId]} (
-                        {me?.voteWeight ?? 1} vote
-                        {(me?.voteWeight ?? 1) === 1 ? "" : "s"}). Waiting for
-                        the full roll.
+                        You voted {activeProposal.votes[playerId].aye} aye /{" "}
+                        {activeProposal.votes[playerId].nay} nay. Waiting for the
+                        full roll.
                       </p>
                     )}
                 </article>
@@ -999,137 +1073,18 @@ export function ChamberApp({ code }: Props) {
           )}
 
           {tab === "admin" && (
-            <div className="space-y-5">
-              <div className="rounded-xl border border-stone/15 bg-ink-soft/60 p-4">
-                <h3 className="text-xs tracking-wide text-brass uppercase">
-                  Chamber dials
-                </h3>
-                <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                  <label className="block text-xs text-stone">
-                    Win threshold (points)
-                    <div className="mt-1 flex gap-2">
-                      <input
-                        type="number"
-                        min={1}
-                        value={winDraft}
-                        onChange={(e) => setWinDraft(e.target.value)}
-                        className="w-full rounded-lg border border-stone/20 bg-ink px-2 py-1.5 text-sm text-mist"
-                      />
-                      <button
-                        type="button"
-                        className="rounded-lg border border-brass/40 px-2 text-xs text-brass"
-                        onClick={() =>
-                          act((ack) =>
-                            getSocket().emit(
-                              "set_win_threshold",
-                              { code: chamberCode, value: Number(winDraft) },
-                              ack,
-                            ),
-                          )
-                        }
-                      >
-                        Set
-                      </button>
-                    </div>
-                  </label>
-                  <label className="block text-xs text-stone">
-                    Passage threshold (% aye)
-                    <div className="mt-1 flex gap-2">
-                      <input
-                        type="number"
-                        min={0}
-                        max={100}
-                        step={1}
-                        value={passDraft}
-                        onChange={(e) => setPassDraft(e.target.value)}
-                        className="w-full rounded-lg border border-stone/20 bg-ink px-2 py-1.5 text-sm text-mist"
-                      />
-                      <button
-                        type="button"
-                        className="rounded-lg border border-brass/40 px-2 text-xs text-brass"
-                        onClick={() =>
-                          act((ack) =>
-                            getSocket().emit(
-                              "set_pass_threshold",
-                              { code: chamberCode, value: Number(passDraft) },
-                              ack,
-                            ),
-                          )
-                        }
-                      >
-                        Set
-                      </button>
-                    </div>
-                    <span className="mt-1 block text-[11px] text-stone/60">
-                      100 = unanimity · 50 = simple majority
-                    </span>
-                  </label>
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-stone/15 bg-ink-soft/60 p-4">
-                <h3 className="text-xs tracking-wide text-brass uppercase">
-                  Vote weights
-                </h3>
-                <p className="mt-1 text-xs text-stone/70">
-                  Set to 0 to exclude a member from roll calls. Higher numbers
-                  count as multiple votes.
-                </p>
-                <ul className="mt-3 space-y-2">
-                  {[...chamber.players]
-                    .sort((a, b) => a.name.localeCompare(b.name))
-                    .map((p) => (
-                      <li
-                        key={p.id}
-                        className="flex flex-wrap items-center gap-2 rounded-lg bg-ink/40 px-3 py-2"
-                      >
-                        <span className="min-w-28 flex-1 text-sm text-mist">
-                          {p.name}
-                          {p.id === playerId ? " (you)" : ""}
-                        </span>
-                        <input
-                          type="number"
-                          min={0}
-                          step={1}
-                          value={
-                            voteWeightDrafts[p.id] ?? String(p.voteWeight ?? 1)
-                          }
-                          onChange={(e) =>
-                            setVoteWeightDrafts((prev) => ({
-                              ...prev,
-                              [p.id]: e.target.value,
-                            }))
-                          }
-                          className="w-20 rounded-lg border border-stone/20 bg-ink px-2 py-1 text-sm text-mist"
-                        />
-                        <button
-                          type="button"
-                          className="rounded-lg border border-brass/40 px-2 py-1 text-xs text-brass"
-                          onClick={() =>
-                            act((ack) =>
-                              getSocket().emit(
-                                "set_vote_weight",
-                                {
-                                  code: chamberCode,
-                                  playerId: p.id,
-                                  weight: Number(
-                                    voteWeightDrafts[p.id] ??
-                                      p.voteWeight ??
-                                      1,
-                                  ),
-                                },
-                                ack,
-                              ),
-                            )
-                          }
-                        >
-                          Set
-                        </button>
-                      </li>
-                    ))}
-                </ul>
-              </div>
-            </div>
+            <AdminPanel
+              chamber={chamber}
+              chamberCode={chamberCode}
+              playerId={playerId}
+              winDraft={winDraft}
+              passDraft={passDraft}
+              setWinDraft={setWinDraft}
+              setPassDraft={setPassDraft}
+              voteWeightDrafts={voteWeightDrafts}
+              setVoteWeightDrafts={setVoteWeightDrafts}
+              act={act}
+            />
           )}
 
           {tab === "journal" && (

@@ -4,6 +4,12 @@ export type GamePhase = "lobby" | "playing" | "finished";
 export type ChatChannel = "floor" | "cloakroom";
 export type RuleStatus = "active" | "amended" | "repealed";
 
+/** How a voter splits their vote weight between aye and nay. */
+export interface Ballot {
+  aye: number;
+  nay: number;
+}
+
 export interface Rule {
   /** Stable identity across amendments. */
   id: string;
@@ -56,7 +62,8 @@ export interface Proposal {
   previousText?: string;
   previousMutable?: boolean;
   status: "debate" | "voting" | "adopted" | "defeated";
-  votes: Record<string, VoteChoice>;
+  /** Player id -> ballot. Legacy string votes are normalized on load. */
+  votes: Record<string, Ballot>;
   createdAt: string;
   resolvedAt?: string;
 }
@@ -151,7 +158,7 @@ export type ClientToServerEvents = {
     ack: (res: ActionAck) => void,
   ) => void;
   cast_vote: (
-    payload: { code: string; choice: VoteChoice },
+    payload: { code: string; aye: number; nay: number },
     ack: (res: ActionAck) => void,
   ) => void;
   adjust_score: (
@@ -178,7 +185,54 @@ export type ClientToServerEvents = {
     payload: { code: string; toId: string; text: string },
     ack: (res: ActionAck) => void,
   ) => void;
+  /** Omnibus admin control — ledger overrides for play. */
+  admin_action: (
+    payload: { code: string; action: AdminAction },
+    ack: (res: ActionAck) => void,
+  ) => void;
 };
+
+export type AdminAction =
+  | { type: "force_adopt_proposal" }
+  | { type: "force_defeat_proposal" }
+  | { type: "withdraw_proposal" }
+  | { type: "open_roll_call" }
+  | {
+      type: "set_ballot";
+      playerId: string;
+      aye: number;
+      nay: number;
+    }
+  | { type: "resolve_vote_now" }
+  | {
+      type: "enact_rule";
+      text: string;
+      mutable?: boolean;
+      number?: number;
+      title?: string;
+    }
+  | {
+      type: "edit_rule";
+      ruleId: string;
+      text?: string;
+      number?: number;
+      mutable?: boolean;
+      status?: RuleStatus;
+    }
+  | { type: "set_rule_mutable"; ruleId: string; mutable: boolean }
+  | { type: "repeal_rule"; ruleId: string }
+  | { type: "restore_rule"; ruleId: string }
+  | { type: "set_score"; playerId: string; score: number }
+  | { type: "set_player_name"; playerId: string; name: string }
+  | { type: "set_vote_weight"; playerId: string; weight: number }
+  | { type: "set_host"; playerId: string }
+  | { type: "set_chamber_title"; title: string }
+  | { type: "set_phase"; phase: GamePhase }
+  | { type: "set_next_proposal_number"; value: number }
+  | { type: "set_win_threshold"; value: number }
+  | { type: "set_pass_threshold"; value: number }
+  | { type: "clear_winner" }
+  | { type: "declare_winner"; playerId: string };
 
 export type ServerToClientEvents = {
   chamber_update: (chamber: PublicChamber) => void;
